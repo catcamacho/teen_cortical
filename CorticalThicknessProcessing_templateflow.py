@@ -64,33 +64,22 @@ def make3DTemplate(subject_T1s, num_proc, output_prefix):
     from os import getcwd
     from shutil import copyfile
     from glob import glob
+    from subprocess import call
 
     curr_dir = getcwd()
 
     #copy T1s into current directory
-    for T1 in subject_T1s:
-        copyfile(T1,curr_dir)
-
-    # determine the common suffix across all the files in the subject_T1s list
-    T1_suffix = subject_T1s[0]
-    for a in range(0,len(subject_T1s)):
-        while T1_suffix not in subject_T1s[a]:
-            T1_suffix = T1_suffix[1:]
-    
-    # determine the common prefix across all the files in the subject_T1s list
-    (folder, T1_prefix) = split(subject_T1s[0])
-    for a in range(0,len(subject_T1s)):
-        while T1_prefix not in subject_T1s[a]:
-            T1_prefix = T1_prefix[:-1]
+    for T in range(0,len(subject_T1s)):
+        [dirname,filename] = split(subject_T1s[T])
+        copyfile(subject_T1s[T],curr_dir + '/S' + str(T)+'_'+filename)
 
     # -c flag is control for local computing (2= use localhost; required for -j flag)
     # -j flag is for number of processors allowed
-    call(['antsMultivariateTemplateConstruction2.sh –d 3 –o %s –r 1 –c 2 –j %d %s*%s' % (output_prefix, num_proc, T1_prefix, T1_suffix)])
+    call(['antsMultivariateTemplateConstruction2.sh', '–d','3','–o', output_prefix,'–r','1','–c','2','–j', str(num_proc), '*.nii.gz'])
     
     sample_template = abspath(output_prefix + 'template0.nii.gz')
     
     return(sample_template)
-
 
 # In[4]:
 
@@ -98,13 +87,14 @@ def make3DTemplate(subject_T1s, num_proc, output_prefix):
 ######### Template creation nodes #########
 
 #convert freesurfer brainmask files to .nii
-convertT1 = MapNode(MRIConvert(out_file='brainmask.nii.gz',
-                               out_type='niigz'), 
+convertT1 = MapNode(MRIConvert(out_file='T1.nii.gz',
+                               out_type='niigz', 
+                    out_orientation='RAS'), 
                     name='convertT1', 
                     iterfield = ['in_file'])
 
 #reorient files to standard space
-reorientT1 = MapNode(Reorient2Std(),
+reorientT1 = MapNode(Reorient2Std(out_file = 'brain_reorient.nii.gz'),
                      name = 'reorientT1',
                      iterfield = ['in_file'])
 
@@ -123,9 +113,8 @@ makeTemplate.inputs.output_prefix='ELS_CT_'
 ######### Template creation workflow #########
 template_flow = Workflow(name = 'template_flow')
 template_flow.connect([(fs_source, convertT1, [('T1','in_file')]),
-                       (convertT1, reorientT1, [('out_file', 'in_file')]),
-                       (reorientT1, makeTemplate, [('out_file', 'subject_T1s')]),
-                       (makeTemplate, datasink, [('sample_template', 'sample_template')])
+                       (convertT1, makeTemplate, [('out_file', 'subject_T1s')]),
+s                       (makeTemplate, datasink, [('sample_template', 'sample_template')])
                       ])
 
 template_flow.base_dir = workflow_dir
