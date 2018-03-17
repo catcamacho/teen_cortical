@@ -53,12 +53,14 @@ FSCommand.set_default_subjects_dir(fs_subjdir)
 ######### File handling #########
 
 #Pass in list to freesurfer source node (subs) 
-fs_source = MapNode(FreeSurferSource(subjects_dir = fs_subjdir), 
-                    name = 'fs_source', iterfield = ['subject_id'])
-fs_source.inputs.subject_id = template_sub
+fs_source = Node(FreeSurferSource(subjects_dir = fs_subjdir), 
+                 name = 'fs_source')
+fs_source.iterables = ('subject_id', template_sub)
 
 #set up datasink
-datasink = Node(DataSink(base_directory = template_proc),
+substitutions = [('_subject_id_','')]
+datasink = Node(DataSink(base_directory = template_proc, 
+                         substitutions=substitutions),
                 name = 'datasink')
 
 
@@ -126,23 +128,6 @@ makeTemplate = Node(Function(input_names=['subject_T1s','num_proc','output_prefi
                     name='makeTemplate')
 makeTemplate.inputs.num_proc=8 # feel free to change to suit what's free on SNI-VCS
 makeTemplate.inputs.output_prefix='ELS_CT_'
-
-
-# In[ ]:
-
-
-######### Template creation workflow #########
-template_flow = Workflow(name = "template_flow")
-template_flow.connect([(fs_source, convertT1, [('T1','in_file')]),
-                       (convertT1, reorientT1, [('out_file', 'in_file')]),
-                       #(reorientT1, makeTemplate, [('out_file', 'subject_T1s')]),
-                       (reorientT1, datasink, ['out_file','sub_T1'])
-                       #(makeTemplate, datasink, [('sample_template', 'sample_template')])
-                      ])
-
-template_flow.base_dir = workflow_dir
-template_flow.write_graph(graph2use = 'flat')
-template_flow.run()
 
 
 # ## Template Subject Tissue Segmentation Workflow
@@ -214,54 +199,54 @@ def aseg_to_tissuemaps(aseg):
 
 
 #convert freesurfer brainmask files to .nii
-convert_to_nii = MapNode(MRIConvert(out_file='brainmask.nii.gz',
-                                    out_type='niigz'), 
-                         name='convert_to_nii', 
-                         iterfield = ['in_file'])
+convert_to_nii = Node(MRIConvert(out_file='brainmask.nii.gz',
+                                 out_type='niigz'), 
+                      name='convert_to_nii', 
+                      iterfield = ['in_file'])
 
 #reorient brainmask file to standard
-reorient_to_std = MapNode(Reorient2Std(),
-                         name = 'reorient_to_std',
-                         iterfield = ['in_file'])
+reorient_to_std = Node(Reorient2Std(),
+                       name = 'reorient_to_std',
+                       iterfield = ['in_file'])
 
 # Reorient aseg to standard
-reorient_aseg = MapNode(Reorient2Std(),
-                         name = 'reorient_aseg',
-                         iterfield = ['in_file'])
+reorient_aseg = Node(Reorient2Std(),
+                     name = 'reorient_aseg',
+                     iterfield = ['in_file'])
 
 #T1 gets run through segmentation (2) ---> results in segmentation into 3 tissue classes (wm, gm, csf)
-segment = MapNode(FAST(number_classes = 3, 
-                       segments=True, 
-                       no_bias=True), 
-                  name = 'segment', 
-                  iterfield = ['in_files'])
+segment = Node(FAST(number_classes = 3, 
+                    segments=True, 
+                    no_bias=True), 
+               name = 'segment', 
+               iterfield = ['in_files'])
 
 # Convert freesurfer aseg to nii
-convert_aseg = MapNode(MRIConvert(out_file='aseg.nii.gz',
-                                    out_type='niigz'), 
-                         name='convert_aseg', 
-                         iterfield = ['in_file'])
+convert_aseg = Node(MRIConvert(out_file='aseg.nii.gz',
+                               out_type='niigz'), 
+                    name='convert_aseg',
+                    iterfield = ['in_file'])
 
 # Split aseg into to types of gray matter
-aseg_to_gm = MapNode(Function(input_names=['aseg'],
-                              output_names=['gm_list'],
-                              function=aseg_to_tissuemaps),
-                     name='aseg_to_gm', 
-                     iterfield=['aseg'])
+aseg_to_gm = Node(Function(input_names=['aseg'],
+                           output_names=['gm_list'],
+                           function=aseg_to_tissuemaps),
+                  name='aseg_to_gm', 
+                  iterfield=['aseg'])
 
 # Relabel the FAST segmentation 
-relabel_fast_seg = MapNode(Function(input_names=['fast_tissue_list'],
-                                    output_names=['wm_csf'],
-                                    function=relabel_fast),
-                           name='relabel_fast_seg',
-                           iterfield=['fast_tissue_list'])
+relabel_fast_seg = Node(Function(input_names=['fast_tissue_list'],
+                                 output_names=['wm_csf'],
+                                 function=relabel_fast),
+                        name='relabel_fast_seg',
+                        iterfield=['fast_tissue_list'])
 
 # make brainmask by binarizing the brainmask
-binarize_brain = MapNode(Binarize(min=1, 
-                                  dilate=1, 
-                                  erode=1), 
-                         name='binarize_brain', 
-                         iterfield=['in_file'])
+binarize_brain = Node(Binarize(min=1, 
+                               dilate=1, 
+                               erode=1), 
+                      name='binarize_brain', 
+                      iterfield=['in_file'])
 
 
 # In[ ]:
@@ -277,6 +262,7 @@ segment_flow.connect([(fs_source, convert_to_nii, [('brainmask','in_file')]),
                       (convert_aseg, reorient_aseg, [('out_file', 'in_file')]),
                       (reorient_aseg, aseg_to_gm, [('out_file', 'aseg')]),
                       (reorient_to_std, binarize_brain, [('out_file','in_file')]),
+                      (reorient_to_std, datasink, [('out_file','anats')]),
                       (binarize_brain, datasink, [('binary_file','brain_seg')]),
                       (aseg_to_gm, datasink, [('gm_list', 'gm_files')]),
                       (relabel_fast_seg, datasink, [('wm_csf', 'wm_csf')])
